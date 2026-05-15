@@ -262,6 +262,21 @@ aborted
 - 减少长列表 DOM 节点数量
 - 提升万级数据下的滚动流畅度
 
+压测结果：
+
+
+| 指标       | 普通 `.map()` | 虚拟列表    |
+| -------- | ----------- | ------- |
+| 数据量      | 10000 条     | 10000 条 |
+| 平均首屏渲染耗时 | 约 1252ms    | 约 50ms  |
+| DOM 行数   | 约 10001 个   | 约 12 个  |
+| 渲染耗时优化   | -           | 约 96%   |
+
+
+压测说明：
+
+该压测主要验证前端长列表渲染性能，不包含数据库查询、网络请求和 AI 生成耗时。
+
 ---
 
 ### 8. 内容导出
@@ -543,6 +558,20 @@ npm run dev
 http://localhost:3000
 ```
 
+---
+
+## 常用脚本
+
+```bash
+npm run dev          # 启动开发环境
+npm run build        # 生产构建
+npm run start        # 启动生产服务
+npm run lint         # ESLint 检查
+
+npm run db:generate  # 生成 Prisma Client
+npm run db:push      # 同步数据库结构
+npm run db:migrate   # 创建开发迁移
+npm run db:studio    # 打开 Prisma Studio
 ```
 
 ---
@@ -675,6 +704,112 @@ requestId + 1
 ```
 
 这显著降低了浏览器布局、绘制和内存压力。
+
+---
+
+## 导出能力
+
+### 单条导出 TXT
+
+单条作品导出在前端完成，不需要请求接口。
+
+导出内容包括：
+
+```txt
+主题
+平台 / 场景
+模型
+创建时间
+生成内容
+```
+
+### 全部导出 TXT / Markdown
+
+全部导出通过后端接口完成，可以导出数据库中当前用户的全部作品。
+
+接口：
+
+```txt
+GET /api/works/export?format=txt&kind=all
+GET /api/works/export?format=md&kind=all
+```
+
+---
+
+## 部署说明
+
+项目可以部署到支持 Next.js 的平台，例如 Vercel。
+
+部署时需要配置以下环境变量：
+
+```txt
+DATABASE_URL
+NEXTAUTH_SECRET
+NEXTAUTH_URL
+AUTH_GITHUB_ID
+AUTH_GITHUB_SECRET
+AUTH_GOOGLE_ID
+AUTH_GOOGLE_SECRET
+DASHSCOPE_API_KEY
+OPENAI_API_KEY
+GOOGLE_GENERATIVE_AI_API_KEY
+```
+
+部署前建议先本地执行：
+
+```bash
+npm run lint
+npm run build
+```
+
+确保无类型错误和构建错误。
+
+---
+
+## GitHub 推送前检查
+
+建议推送前确认：
+
+```bash
+npm run lint
+npm run build
+```
+
+确认 `.gitignore` 中包含：
+
+```gitignore
+node_modules
+.next
+.env
+.env.local
+.env.*.local
+.DS_Store
+```
+
+不要提交：
+
+```txt
+.env.local
+数据库连接字符串
+API Key
+OAuth Secret
+```
+
+---
+
+## 后续可优化方向
+
+- 生成失败后的一键重试
+- 作品库批量删除
+- 作品收藏 / 置顶
+- 作品搜索支持服务端查询
+- 模型失败自动 fallback
+- Prompt 版本管理
+- 生成耗时与模型成功率统计
+- 单元测试覆盖 generationReducer、Prompt 选择和历史数据解析
+- 更多平台支持，例如公众号、抖音、小红书封面文案等
+
+---
 
 ---
 

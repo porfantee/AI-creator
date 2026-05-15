@@ -1,6 +1,5 @@
 import { DEFAULT_MODEL_ID } from "@/lib/models";
 import type { WorkListItem } from "@/lib/history-list";
-import { structuredFromUnknown } from "@/lib/structured/parse";
 
 /** 与 `WorkListItem` 同形，本地历史专用导出名 */
 export type HistoryItem = WorkListItem;
@@ -60,7 +59,6 @@ export function getHistory(): HistoryItem[] {
           : typeof item.scene === "string"
             ? item.scene
             : undefined,
-      structuredJson: structuredFromUnknown(item.structuredJson ?? null) ?? undefined,
     }));
   }
 

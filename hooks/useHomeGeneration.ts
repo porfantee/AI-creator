@@ -4,20 +4,12 @@ import {
   type FormEvent,
   type MutableRefObject,
 } from "react";
-import type {
-  GenerateMode,
-  GenerateStructuredApiResponse,
-  ModelId,
-  Platform,
-  RewriteAction,
-  SceneId,
-  StructuredContent,
-} from "@/lib/types";
+import type { ModelId, Platform, RewriteAction, SceneId } from "@/lib/types";
 import {
   scheduleGenerationSuccessReset,
   type GenerationAction,
+  type GenerationPayload,
 } from "@/hooks/generationReducer";
-import { formatStructuredAsPlain } from "@/lib/structured/format";
 import { throwIfResponseNotOk } from "@/utils/http";
 import { readPlainTextStreamResponse } from "@/utils/readPlainTextStream";
 
@@ -35,7 +27,7 @@ type PersistSuccess = (
   submittedModelId: ModelId,
   submittedPrompt: string,
   text: string,
-  structured?: StructuredContent | null
+  structured: null
 ) => Promise<void>;
 
 type UseHomeGenerationArgs = {
@@ -45,18 +37,33 @@ type UseHomeGenerationArgs = {
   platform: Platform;
   scene: SceneId;
   modelId: ModelId;
-  generateMode: GenerateMode;
-  /** generating / stopping / success 时禁止重复提交 */
+  /** submitting / streaming / parsing / persisting 时禁止重复提交 */
   isBusy: boolean;
-  structuredResult: StructuredContent | null;
   completion: string;
   setCompletion: (v: string | ((prev: string) => string)) => void;
-  setStructuredResult: (v: StructuredContent | null) => void;
   persistSuccess: PersistSuccess;
 };
 
 function failMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
+}
+
+function isAbortError(err: unknown): boolean {
+  return (err as Error)?.name === "AbortError";
+}
+
+function beginRequest(
+  requestIdRef: MutableRefObject<number>,
+  abortControllerRef: MutableRefObject<AbortController | null>
+) {
+  abortControllerRef.current?.abort();
+  const controller = new AbortController();
+  abortControllerRef.current = controller;
+
+  const id = ++requestIdRef.current;
+  const isCurrent = () => id === requestIdRef.current;
+
+  return { id, controller, isCurrent };
 }
 
 export function useHomeGeneration({
@@ -66,43 +73,42 @@ export function useHomeGeneration({
   platform,
   scene,
   modelId,
-  generateMode,
   isBusy,
-  structuredResult,
   completion,
   setCompletion,
-  setStructuredResult,
   persistSuccess,
 }: UseHomeGenerationArgs) {
-  const { requestIdRef, abortControllerRef, submitLockRef, stopCooldownUntilRef, rafIdRef } =
-    refs;
+  const {
+    requestIdRef,
+    abortControllerRef,
+    submitLockRef,
+    stopCooldownUntilRef,
+    rafIdRef,
+  } = refs;
 
   const streamFromApi = useCallback(
     async (
       url: string,
       body: Record<string, unknown>,
-      meta: {
-        submittedPlatform: Platform;
-        submittedScene: SceneId;
-        submittedModelId: ModelId;
-        submittedPrompt: string;
-      },
+      payload: GenerationPayload,
       options: {
         clearCompletion: boolean;
         errorHint: string;
-        beforeStream?: () => void;
       }
     ) => {
-      abortControllerRef.current?.abort();
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
+      const { id, controller, isCurrent } = beginRequest(
+        requestIdRef,
+        abortControllerRef
+      );
 
-      const id = ++requestIdRef.current;
-      const isCurrent = () => id === requestIdRef.current;
+      dispatch({
+        type: "SUBMIT_REQUESTED",
+        requestId: id,
+        payload,
+        reason: "submit",
+      });
 
-      dispatch({ type: "START", requestId: id });
       if (options.clearCompletion) setCompletion("");
-      options.beforeStream?.();
 
       try {
         const res = await fetch(url, {
@@ -113,51 +119,81 @@ export function useHomeGeneration({
         });
         await throwIfResponseNotOk(res);
 
+        if (!isCurrent()) return;
+
+        dispatch({
+          type: "REQUEST_ACCEPTED",
+          requestId: id,
+          mode: "plain",
+        });
+
         const fullText = await readPlainTextStreamResponse(res, {
           isCurrent,
           setText: setCompletion,
           rafRef: rafIdRef,
         });
 
-        if (isCurrent()) {
-          try {
-            await persistSuccess(
-              meta.submittedPlatform,
-              meta.submittedScene,
-              meta.submittedModelId,
-              meta.submittedPrompt,
-              fullText,
-              null
-            );
-            dispatch({ type: "SUCCESS", requestId: id });
-            scheduleGenerationSuccessReset(dispatch, id);
-          } catch (persistErr) {
-            console.error(persistErr);
-            const msg = failMessage(persistErr, "保存失败，请稍后重试。");
-            dispatch({ type: "FAIL", message: msg, requestId: id });
-          }
-        }
+        if (!isCurrent()) return;
+
+        dispatch({ type: "PERSIST_STARTED", requestId: id });
+
+        await persistSuccess(
+          payload.platform as Platform,
+          (payload.scene ?? scene) as SceneId,
+          payload.modelId as ModelId,
+          payload.input,
+          fullText,
+          null
+        );
+
+        if (!isCurrent()) return;
+
+        dispatch({ type: "REQUEST_SUCCEEDED", requestId: id });
+        scheduleGenerationSuccessReset(dispatch, id);
       } catch (err) {
-        if ((err as Error)?.name === "AbortError") {
-          dispatch({ type: "ABORT_DONE", requestId: id });
+        if (isAbortError(err)) {
+          if (isCurrent()) {
+            dispatch({ type: "REQUEST_ABORTED", requestId: id });
+          }
           return;
         }
+
         console.error(err);
         if (!isCurrent()) return;
+
         const msg = failMessage(err, options.errorHint);
         setCompletion(msg);
-        dispatch({ type: "FAIL", message: msg, requestId: id });
+        dispatch({ type: "REQUEST_FAILED", message: msg, requestId: id });
       }
     },
-    [dispatch, abortControllerRef, requestIdRef, rafIdRef, setCompletion, persistSuccess]
+    [
+      abortControllerRef,
+      dispatch,
+      persistSuccess,
+      rafIdRef,
+      requestIdRef,
+      scene,
+      setCompletion,
+    ]
   );
 
   const handleStop = useCallback(() => {
-    const rid = requestIdRef.current;
-    dispatch({ type: "STOPPING", requestId: rid });
     abortControllerRef.current?.abort();
     stopCooldownUntilRef.current = Date.now() + 450;
-  }, [dispatch, requestIdRef, abortControllerRef, stopCooldownUntilRef]);
+  }, [abortControllerRef, stopCooldownUntilRef]);
+
+  /**
+   * 作废当前在途生成：中止 fetch、取消流式 RAF、抬升 requestId。
+   * 页面在 RESET / 切换历史等场景只调此方法即可，不必关心 ref 细节。
+   */
+  const discardInFlightGeneration = useCallback((): void => {
+    abortControllerRef.current?.abort();
+    if (rafIdRef.current != null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    requestIdRef.current += 1;
+  }, [abortControllerRef, rafIdRef, requestIdRef]);
 
   const onSubmit = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
@@ -170,81 +206,6 @@ export function useHomeGeneration({
       submitLockRef.current = true;
       try {
         const submittedPrompt = input;
-        const meta = {
-          submittedPlatform: platform,
-          submittedScene: scene,
-          submittedModelId: modelId,
-          submittedPrompt,
-        };
-
-        if (generateMode === "structured") {
-          abortControllerRef.current?.abort();
-          const controller = new AbortController();
-          abortControllerRef.current = controller;
-
-          const id = ++requestIdRef.current;
-          const isCurrent = () => id === requestIdRef.current;
-
-          dispatch({ type: "START", requestId: id });
-          setCompletion("");
-          setStructuredResult(null);
-
-          try {
-            const res = await fetch("/api/generate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                prompt: submittedPrompt,
-                platform,
-                scene,
-                modelId,
-                mode: "structured",
-              }),
-              signal: controller.signal,
-            });
-            await throwIfResponseNotOk(res);
-            const data = (await res.json()) as
-              | GenerateStructuredApiResponse
-              | { error?: string };
-            if (!isCurrent()) return;
-
-            if (data && "mode" in data && data.mode === "structured" && data.structured) {
-              const plain = formatStructuredAsPlain(data.structured);
-              setStructuredResult(data.structured);
-              setCompletion(plain);
-              try {
-                await persistSuccess(
-                  meta.submittedPlatform,
-                  meta.submittedScene,
-                  meta.submittedModelId,
-                  meta.submittedPrompt,
-                  plain,
-                  data.structured
-                );
-                dispatch({ type: "SUCCESS", requestId: id });
-                scheduleGenerationSuccessReset(dispatch, id);
-              } catch (persistErr) {
-                console.error(persistErr);
-                const msg = failMessage(persistErr, "保存失败，请稍后重试。");
-                dispatch({ type: "FAIL", message: msg, requestId: id });
-              }
-            } else {
-              throw new Error("响应格式异常");
-            }
-          } catch (err) {
-            if ((err as Error)?.name === "AbortError") {
-              dispatch({ type: "ABORT_DONE", requestId: id });
-              return;
-            }
-            console.error(err);
-            if (!isCurrent()) return;
-            const msg = failMessage(err, "结构化生成失败，请稍后重试。");
-            setCompletion(msg);
-            setStructuredResult(null);
-            dispatch({ type: "FAIL", message: msg, requestId: id });
-          }
-          return;
-        }
 
         await streamFromApi(
           "/api/generate",
@@ -253,13 +214,18 @@ export function useHomeGeneration({
             platform,
             scene,
             modelId,
-            mode: "plain",
           },
-          meta,
+          {
+            kind: "generate",
+            mode: "plain",
+            platform,
+            scene,
+            modelId,
+            input: submittedPrompt,
+          },
           {
             clearCompletion: true,
             errorHint: "生成失败，请稍后重试。",
-            beforeStream: () => setStructuredResult(null),
           }
         );
       } finally {
@@ -267,21 +233,14 @@ export function useHomeGeneration({
       }
     },
     [
-      submitLockRef,
-      stopCooldownUntilRef,
       input,
+      isBusy,
+      modelId,
       platform,
       scene,
-      modelId,
-      generateMode,
-      abortControllerRef,
-      requestIdRef,
-      dispatch,
-      setCompletion,
-      setStructuredResult,
-      persistSuccess,
+      stopCooldownUntilRef,
       streamFromApi,
-      isBusy,
+      submitLockRef,
     ]
   );
 
@@ -290,83 +249,6 @@ export function useHomeGeneration({
       if (isBusy) return;
 
       const submittedPrompt = input;
-      const meta = {
-        submittedPlatform: platform,
-        submittedScene: scene,
-        submittedModelId: modelId,
-        submittedPrompt,
-      };
-
-      const snapshot = structuredResult;
-      if (snapshot) {
-        abortControllerRef.current?.abort();
-        const controller = new AbortController();
-        abortControllerRef.current = controller;
-
-        const id = ++requestIdRef.current;
-        const isCurrent = () => id === requestIdRef.current;
-
-        dispatch({ type: "START", requestId: id });
-        setCompletion("");
-        setStructuredResult(null);
-
-        try {
-          const res = await fetch("/api/rewrite", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action,
-              platform,
-              scene,
-              modelId,
-              originalPrompt: submittedPrompt,
-              mode: "structured",
-              structuredJson: snapshot,
-            }),
-            signal: controller.signal,
-          });
-          await throwIfResponseNotOk(res);
-          const data = (await res.json()) as GenerateStructuredApiResponse | { error?: string };
-          if (!isCurrent()) return;
-
-          if (data && "mode" in data && data.mode === "structured" && data.structured) {
-            const plain = formatStructuredAsPlain(data.structured);
-            setStructuredResult(data.structured);
-            setCompletion(plain);
-            try {
-              await persistSuccess(
-                meta.submittedPlatform,
-                meta.submittedScene,
-                meta.submittedModelId,
-                meta.submittedPrompt,
-                plain,
-                data.structured
-              );
-              dispatch({ type: "SUCCESS", requestId: id });
-              scheduleGenerationSuccessReset(dispatch, id);
-            } catch (persistErr) {
-              console.error(persistErr);
-              const msg = failMessage(persistErr, "保存失败，请稍后重试。");
-              dispatch({ type: "FAIL", message: msg, requestId: id });
-            }
-          } else {
-            throw new Error("响应格式异常");
-          }
-        } catch (err) {
-          if ((err as Error)?.name === "AbortError") {
-            dispatch({ type: "ABORT_DONE", requestId: id });
-            return;
-          }
-          console.error(err);
-          if (!isCurrent()) return;
-          const msg = failMessage(err, "结构化改写失败，请稍后重试。");
-          setCompletion(msg);
-          setStructuredResult(null);
-          dispatch({ type: "FAIL", message: msg, requestId: id });
-        }
-        return;
-      }
-
       const current = completion.trim();
       if (!current) return;
 
@@ -380,31 +262,23 @@ export function useHomeGeneration({
           originalPrompt: submittedPrompt,
           currentContent: current,
         },
-        meta,
+        {
+          kind: "rewrite",
+          mode: "plain",
+          platform,
+          scene,
+          modelId,
+          input: submittedPrompt,
+          rewriteAction: action,
+        },
         {
           clearCompletion: true,
           errorHint: "改写失败，请稍后重试。",
-          beforeStream: () => setStructuredResult(null),
         }
       );
     },
-    [
-      input,
-      platform,
-      scene,
-      modelId,
-      abortControllerRef,
-      requestIdRef,
-      dispatch,
-      setCompletion,
-      setStructuredResult,
-      persistSuccess,
-      streamFromApi,
-      isBusy,
-      structuredResult,
-      completion,
-    ]
+    [completion, input, isBusy, modelId, platform, scene, streamFromApi]
   );
 
-  return { onSubmit, handleStop, handleRewrite };
+  return { onSubmit, handleStop, handleRewrite, discardInFlightGeneration };
 }

@@ -1,6 +1,5 @@
-import type { ModelId, Platform, StructuredContent } from "@/lib/types";
+import type { ModelId, Platform } from "@/lib/types";
 import { isPlatform, parseModelId } from "@/lib/guards";
-import { structuredFromUnknown } from "@/lib/structured/parse";
 
 const STORAGE_KEY = "continue_edit_v1";
 
@@ -11,7 +10,6 @@ export type ContinueEditPayload = {
   modelId: ModelId;
   prompt: string;
   completion: string;
-  structuredJson: StructuredContent | null;
 };
 
 export function saveContinueEditPayload(payload: ContinueEditPayload): void {
@@ -49,16 +47,12 @@ function parseContinueEditPayload(data: unknown): ContinueEditPayload | null {
       : typeof o.scene === "string"
         ? o.scene
         : null;
-  const structured =
-    o.structuredJson === null || o.structuredJson === undefined
-      ? null
-      : structuredFromUnknown(o.structuredJson);
+
   return {
     platform: o.platform,
     scene,
     modelId,
     prompt: o.prompt,
     completion: o.completion,
-    structuredJson: structured,
   };
 }

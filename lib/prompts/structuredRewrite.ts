@@ -11,8 +11,9 @@ const PLATFORM_LABEL: Record<Platform, string> = {
 const JSON_CONTRACT = `【输出格式（必须严格遵守）】
 你只允许输出**一个** JSON 对象，不要 markdown 代码块，不要任何前缀或后缀说明文字。
 JSON 的键必须且仅为：
+- schemaVersion：数字，固定为 1；
 - title：字符串，标题；
-- body：字符串，正文（允许使用 \\n 表示换行）；
+- content：字符串数组，每个元素为一段正文（一段内可用 \\n 换行）；
 - tags：字符串数组，每个元素为一个标签词，不要带 # 号。
 
 标签数量建议 3～8 个。请确保 JSON 可被标准 JSON.parse 解析。`;
@@ -40,7 +41,7 @@ export function buildStructuredRewriteMessages(
 ${JSON_CONTRACT}
 
 【二次创作任务】
-用户已有一版**结构化**文案（title / body / tags）。请基于**同一主题与上文创作规则**，再输出**一版全新**的 JSON：
+用户已有一版**结构化**文案（schemaVersion / title / content / tags）。请基于**同一主题与上文创作规则**，再输出**一版全新**的 JSON：
 - 切入点、结构或叙事应与上一版有明显差异，禁止只做同义词替换或小幅润色。
 - 仍需满足该平台与场景下的格式与风格要求。
 - 只输出 JSON 对象，不要解释。`;
@@ -66,7 +67,7 @@ ${draftJson}`;
 ${JSON_CONTRACT}
 
 【改写任务】
-在保留原意、关键信息与「${platformLabel}」常见调性的前提下，将 title、body **明显精简缩短**；tags 可酌情减少但仍要贴切。只输出改写后的 JSON，不要解释。`;
+在保留原意、关键信息与「${platformLabel}」常见调性的前提下，将 title、content **明显精简缩短**；tags 可酌情减少但仍要贴切。只输出改写后的 JSON，不要解释。`;
     return { system, user: contextBlock };
   }
 
@@ -76,7 +77,7 @@ ${JSON_CONTRACT}
 ${JSON_CONTRACT}
 
 【改写任务】
-将 title、body 改得更口语化、亲切、好读；tags 可略作口语化但仍为简短名词或短语。只输出改写后的 JSON，不要解释。`;
+将 title、content 改得更口语化、亲切、好读；tags 可略作口语化但仍为简短名词或短语。只输出改写后的 JSON，不要解释。`;
     return { system, user: contextBlock };
   }
 
@@ -85,6 +86,6 @@ ${JSON_CONTRACT}
 ${JSON_CONTRACT}
 
 【改写任务】
-将 title、body 改得更正式、专业、条理清晰；tags 可更偏专业检索词。只输出改写后的 JSON，不要解释。`;
+将 title、content 改得更正式、专业、条理清晰；tags 可更偏专业检索词。只输出改写后的 JSON，不要解释。`;
   return { system, user: contextBlock };
 }

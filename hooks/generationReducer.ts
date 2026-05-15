@@ -2,114 +2,194 @@ import type { Dispatch } from "react";
 
 export type GenerationPhase =
   | "idle"
-  | "generating"
-  | "stopping"
+  | "submitting"
+  | "streaming"
+  | "parsing"
+  | "persisting"
   | "success"
-  | "error";
+  | "error"
+  | "aborted";
+
+export type GenerationPayload = {
+  kind: "generate" | "rewrite";
+  mode: "plain" | "structured";
+  platform: string;
+  scene?: string | null;
+  modelId: string;
+  input: string;
+  rewriteAction?: string;
+};
 
 export type GenerationState = {
   phase: GenerationPhase;
   errorMessage: string | null;
   /** 当前生效的请求代次；0 表示无进行中请求 */
   activeRequestId: number;
+  /** 最近一次真正提交的参数，用于 retry */
+  lastSubmittedPayload: GenerationPayload | null;
+  /** 最近一次提交来源：普通提交或重试 */
+  submitReason: "submit" | "retry" | null;
 };
 
 export type GenerationAction =
-  | { type: "START"; requestId: number }
-  | { type: "STOPPING"; requestId: number }
-  /** 中止（Abort）链路收尾：generating/stopping → idle；成功路径用 SUCCESS，不走此项 */
-  | { type: "ABORT_DONE"; requestId: number }
-  | { type: "SUCCESS"; requestId: number }
-  | { type: "FAIL"; message: string; requestId: number }
-  /** 用户触发的全量重置（关错误条、选历史、继续编辑等） */
+  | {
+      type: "SUBMIT_REQUESTED";
+      requestId: number;
+      payload: GenerationPayload;
+      reason: "submit" | "retry";
+    }
+  | {
+      type: "REQUEST_ACCEPTED";
+      requestId: number;
+      mode: "plain" | "structured";
+    }
+  | { type: "STRUCTURED_PARSE_STARTED"; requestId: number }
+  | { type: "PERSIST_STARTED"; requestId: number }
+  | { type: "REQUEST_SUCCEEDED"; requestId: number }
+  | { type: "REQUEST_ABORTED"; requestId: number }
+  | { type: "REQUEST_FAILED"; message: string; requestId: number }
   | { type: "RESET" }
-  /**
-   * 成功提示条倒计时结束：仅当仍是「该次 requestId 的 success」时才回 idle，
-   * 避免 1.2s 内用户已开新请求时被误清。
-   */
   | { type: "SUCCESS_AUTO_IDLE"; requestId: number };
 
 function matchesRequest(state: GenerationState, requestId: number): boolean {
   return requestId > 0 && state.activeRequestId === requestId;
 }
 
-export function generationReducer(
+function reduceGenerationState(
   state: GenerationState,
   action: GenerationAction
 ): GenerationState {
-  let next: GenerationState = state;
   switch (action.type) {
-    case "START":
+    case "SUBMIT_REQUESTED": {
       if (action.requestId <= 0) return state;
       return {
-        phase: "generating",
+        phase: "submitting",
         errorMessage: null,
         activeRequestId: action.requestId,
+        lastSubmittedPayload: action.payload,
+        submitReason: action.reason,
       };
+    }
 
-    case "STOPPING":
+    case "REQUEST_ACCEPTED": {
       if (
-        state.phase === "generating" &&
+        state.phase !== "submitting" ||
+        !matchesRequest(state, action.requestId)
+      ) {
+        return state;
+      }
+
+      return {
+        ...state,
+        phase: action.mode === "plain" ? "streaming" : "parsing",
+      };
+    }
+
+    case "STRUCTURED_PARSE_STARTED": {
+      if (
+        (state.phase === "submitting" || state.phase === "streaming") &&
         matchesRequest(state, action.requestId)
       ) {
         return {
           ...state,
-          phase: "stopping",
+          phase: "parsing",
         };
       }
       return state;
+    }
 
-    case "ABORT_DONE":
+    case "PERSIST_STARTED": {
       if (
-        (state.phase === "stopping" || state.phase === "generating") &&
+        (state.phase === "streaming" || state.phase === "parsing") &&
         matchesRequest(state, action.requestId)
       ) {
         return {
-          phase: "idle",
-          errorMessage: null,
-          activeRequestId: 0,
+          ...state,
+          phase: "persisting",
         };
       }
       return state;
+    }
 
-    case "SUCCESS":
+    case "REQUEST_SUCCEEDED": {
       if (
-        state.phase === "generating" &&
+        (state.phase === "submitting" ||
+          state.phase === "streaming" ||
+          state.phase === "parsing" ||
+          state.phase === "persisting") &&
         matchesRequest(state, action.requestId)
       ) {
         return {
+          ...state,
           phase: "success",
           errorMessage: null,
           activeRequestId: action.requestId,
         };
       }
       return state;
+    }
 
-    case "FAIL":
+    case "REQUEST_ABORTED": {
       if (
-        (state.phase === "generating" || state.phase === "stopping") &&
+        (state.phase === "submitting" ||
+          state.phase === "streaming" ||
+          state.phase === "parsing" ||
+          state.phase === "persisting") &&
         matchesRequest(state, action.requestId)
       ) {
         return {
+          ...state,
+          phase: "aborted",
+          errorMessage: null,
+          activeRequestId: 0,
+        };
+      }
+      return state;
+    }
+
+    case "REQUEST_FAILED": {
+      if (
+        (state.phase === "submitting" ||
+          state.phase === "streaming" ||
+          state.phase === "parsing" ||
+          state.phase === "persisting") &&
+        matchesRequest(state, action.requestId)
+      ) {
+        return {
+          ...state,
           phase: "error",
           errorMessage: action.message,
           activeRequestId: 0,
         };
       }
       return state;
+    }
 
     case "RESET":
       return initialGenerationState;
 
-    case "SUCCESS_AUTO_IDLE":
+    case "SUCCESS_AUTO_IDLE": {
       if (state.phase === "success" && matchesRequest(state, action.requestId)) {
-        return initialGenerationState;
+        return {
+          ...state,
+          phase: "idle",
+          errorMessage: null,
+          activeRequestId: 0,
+        };
       }
       return state;
+    }
 
     default:
-      next = state;
+      return state;
   }
+}
+
+export function generationReducer(
+  state: GenerationState,
+  action: GenerationAction
+): GenerationState {
+  const next = reduceGenerationState(state, action);
   logGenerationTransition(state, action, next);
   return next;
 }
@@ -118,6 +198,8 @@ export const initialGenerationState: GenerationState = {
   phase: "idle",
   errorMessage: null,
   activeRequestId: 0,
+  lastSubmittedPayload: null,
+  submitReason: null,
 };
 
 const SUCCESS_RESET_MS = 1200;
@@ -140,11 +222,9 @@ function logGenerationTransition(
 ): void {
   if (process.env.NODE_ENV !== "development") return;
   if (typeof window === "undefined") return;
-  // eslint-disable-next-line no-console
   console.debug("[generation]", {
     action,
     prev: { phase: prev.phase, activeRequestId: prev.activeRequestId },
     next: { phase: next.phase, activeRequestId: next.activeRequestId },
   });
 }
-

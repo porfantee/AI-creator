@@ -1,6 +1,18 @@
-import type { GenerateMode, ModelId, Platform, SceneId } from "@/lib/types";
+"use client";
+
+import type { ModelId, Platform, SceneId } from "@/lib/types";
 import type { SceneOption } from "@/lib/scenes";
 import { MODEL_OPTIONS } from "@/lib/models";
+import { getPlatformLabel } from "@/lib/platform-label";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 type Props = {
   input: string;
@@ -12,11 +24,12 @@ type Props = {
   sceneOptions: SceneOption[];
   modelId: ModelId;
   setModelId: (v: ModelId) => void;
-  generateMode: GenerateMode;
-  setGenerateMode: (v: GenerateMode) => void;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
   onStop: () => void;
-  isLoading?: boolean;
+  /** 整段生成流程进行中（含持久化），用于禁止重复提交等 */
+  isBusy?: boolean;
+  /** 仍可中止网络/流式阶段时为 true；持久化等阶段为 false */
+  canStop?: boolean;
 };
 
 export default function GeneratorForm({
@@ -29,79 +42,112 @@ export default function GeneratorForm({
   sceneOptions,
   modelId,
   setModelId,
-  generateMode,
-  setGenerateMode,
   onSubmit,
   onStop,
-  isLoading,
+  isBusy = false,
+  /** 未传时与旧版单 isLoading 行为一致：忙即显示停止 */
+  canStop = isBusy,
 }: Props) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <div className="flex flex-wrap items-center gap-6">
-        <select
+      <div className="flex flex-wrap items-center gap-4">
+        <Select
+          disabled={isBusy}
           value={platform}
-          onChange={(e) => setPlatform(e.target.value as Platform)}
-          className="border rounded p-2 min-w-[8rem]"
+          onValueChange={(v) => {
+            if (v != null) setPlatform(v as Platform);
+          }}
         >
-          <option value="xhs">小红书</option>
-          <option value="weibo">微博</option>
-          <option value="zhihu">知乎</option>
-        </select>
+          <SelectTrigger className="min-w-[8rem] w-[8rem]">
+            <SelectValue>
+              {(v) =>
+                v != null && v !== ""
+                  ? getPlatformLabel(v as Platform)
+                  : null}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="xhs">小红书</SelectItem>
+            <SelectItem value="weibo">微博</SelectItem>
+            <SelectItem value="zhihu">知乎</SelectItem>
+          </SelectContent>
+        </Select>
 
-        <select
+        <Select
+          disabled={isBusy}
           value={scene}
-          onChange={(e) => setScene(e.target.value as SceneId)}
-          className="border rounded p-2 min-w-[10rem]"
+          onValueChange={(v) => {
+            if (v != null) setScene(v as SceneId);
+          }}
         >
-          {sceneOptions.map((opt) => (
-            <option key={opt.id} value={opt.id}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className="min-w-[10rem] w-[10rem]">
+            <SelectValue>
+              {(v) => {
+                if (v == null || v === "") return null;
+                const opt = sceneOptions.find((o) => o.id === v);
+                return opt?.label ?? String(v);
+              }}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {sceneOptions.map((opt) => (
+              <SelectItem key={opt.id} value={opt.id}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        <select
+        <Select
+          disabled={isBusy}
           value={modelId}
-          onChange={(e) => setModelId(e.target.value as ModelId)}
-          className="border rounded p-2 flex-1 min-w-[12rem]"
+          onValueChange={(v) => {
+            if (v != null) setModelId(v as ModelId);
+          }}
         >
-          {MODEL_OPTIONS.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={generateMode}
-          onChange={(e) => setGenerateMode(e.target.value as GenerateMode)}
-          className="border rounded p-2 min-w-[10rem]"
-        >
-          <option value="plain">流式纯文本</option>
-          <option value="structured">结构化 JSON</option>
-        </select>
+          <SelectTrigger className="min-w-[12rem] flex-1">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MODEL_OPTIONS.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      <textarea
+      <Textarea
         value={input}
         onChange={(e) => setInput(e.target.value)}
+        disabled={isBusy}
         onKeyDown={(e) => {
           if (e.key !== "Enter") return;
           if (e.shiftKey) return;
           if (e.nativeEvent.isComposing) return;
-          if (isLoading) return;
+          if (isBusy) return;
           if (!input.trim()) return;
           e.preventDefault();
           e.currentTarget.form?.requestSubmit();
         }}
-        title="Enter 提交生成；Shift+Enter 换行"
-        className="w-full border rounded p-4"
+        title="Enter 提交生成；Shift+Enter 换行；生成进行中不可编辑"
+        className="min-h-32 p-4"
       />
 
-      {isLoading ? (
-        <button
+      {!isBusy ? (
+        <Button
+          type="submit"
+          disabled={!input.trim()}
+          className="w-full h-11 text-base bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+        >
+          生成内容
+        </Button>
+      ) : canStop ? (
+        <Button
           type="button"
-          className="w-full bg-gray-700 hover:bg-gray-800 text-white font-medium px-4 py-3 rounded transition-colors"
+          variant="secondary"
+          className="w-full h-11 text-base"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -109,15 +155,16 @@ export default function GeneratorForm({
           }}
         >
           停止生成
-        </button>
+        </Button>
       ) : (
-        <button
-          type="submit"
-          className="w-full bg-red-500 hover:bg-red-600 text-white font-medium px-4 py-3 rounded disabled:bg-gray-300 transition-colors"
-          disabled={!input.trim()}
+        <Button
+          type="button"
+          variant="secondary"
+          disabled
+          className="w-full h-11 text-base opacity-80 cursor-not-allowed"
         >
-          生成内容
-        </button>
+          保存中…
+        </Button>
       )}
     </form>
   );

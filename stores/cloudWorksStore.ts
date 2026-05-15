@@ -169,11 +169,12 @@ export const useCloudWorksStore = create<CloudWorksState>()(
 
       removeWork(id) {
         set((s) => {
-          const { [id]: _, ...rest } = s.sidebarHiddenIds;
+          const sidebarHiddenIds = { ...s.sidebarHiddenIds };
+          delete sidebarHiddenIds[id];
           const nextWorksItems = s.worksItems.filter((w) => w.id !== id);
           return {
             worksItems: nextWorksItems,
-            sidebarHiddenIds: rest,
+            sidebarHiddenIds,
             ...(nextWorksItems.length === 0 ? { worksHasMore: false } : {}),
           };
         });

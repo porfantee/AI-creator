@@ -1,6 +1,5 @@
-import type { ModelId, Platform, StructuredContent } from "@/lib/types";
+import type { ModelId, Platform } from "@/lib/types";
 import { isPlatform, parseModelId } from "@/lib/guards";
-import { structuredFromUnknown } from "@/lib/structured/parse";
 
 /**
  * 历史面板 / 作品列表统一项（本地 localStorage 与云端 `/api/works` 在 UI 层共用）。
@@ -14,7 +13,8 @@ export type WorkListItem = {
   /** 毫秒时间戳，与现有 formatTime 一致 */
   createdAt: number;
   scene?: string | null;
-  structuredJson?: StructuredContent | null;
+  /** @deprecated 结构化输出已下线；保留 null 兼容旧缓存 / 旧接口返回。 */
+  structuredJson?: null;
 };
 
 /** @deprecated 语义上请优先使用 WorkListItem；保留别名以免大范围重命名 */
@@ -40,6 +40,7 @@ export type WorkApiRow = {
   modelId: string;
   prompt: string;
   completion: string;
+  /** @deprecated 结构化输出已下线；旧数据可能仍返回该字段，前端忽略。 */
   structuredJson?: unknown | null;
   createdAt: string;
   updatedAt: string;
@@ -50,7 +51,7 @@ export function workApiRowToListItem(w: WorkApiRow): WorkListItem | null {
   if (!isPlatform(w.platform)) return null;
   const modelId = parseModelId(w.modelId);
   if (!modelId) return null;
-  const structuredJson = structuredFromUnknown(w.structuredJson ?? null);
+
   return {
     id: w.id,
     platform: w.platform,
@@ -59,6 +60,6 @@ export function workApiRowToListItem(w: WorkApiRow): WorkListItem | null {
     completion: w.completion,
     createdAt: new Date(w.createdAt).getTime(),
     scene: w.scene,
-    structuredJson: structuredJson ?? undefined,
+    structuredJson: null,
   };
 }

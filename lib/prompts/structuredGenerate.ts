@@ -16,8 +16,9 @@ export function buildStructuredGeneratePrompts(
 【输出格式（必须严格遵守）】
 你只允许输出**一个** JSON 对象，不要 markdown 代码块，不要任何前缀或后缀说明文字。
 JSON 的键必须且仅为：
+- schemaVersion：数字，固定为 1；
 - title：字符串，标题；
-- body：字符串，正文（允许使用 \\n 表示换行）；
+- content：字符串数组，每个元素为一段正文（一段内可用 \\n 换行）；
 - tags：字符串数组，每个元素为一个标签词，不要带 # 号。
 
 标签数量建议 3～8 个。请确保 JSON 可被标准 JSON.parse 解析。`;

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
-  title: "内容爆款生成器",
+  title: "AI内容创作平台",
   description: "支持小红书、微博、知乎的流式文案生成工具",
 };
 

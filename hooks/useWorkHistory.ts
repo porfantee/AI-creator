@@ -7,7 +7,7 @@ import {
   type MutableRefObject,
 } from "react";
 import type { Session } from "next-auth";
-import type { ModelId, Platform, SceneId, StructuredContent } from "@/lib/types";
+import type { ModelId, Platform, SceneId } from "@/lib/types";
 import {
   fetchWorksListFullFromApi,
   fetchWorksPageFromApi,
@@ -219,7 +219,6 @@ export function useWorkHistory(
       submittedModelId: ModelId,
       submittedPrompt: string,
       text: string,
-      structured: StructuredContent | null = null
     ) => {
       if (!text.trim()) return;
 
@@ -233,7 +232,7 @@ export function useWorkHistory(
             prompt: submittedPrompt,
             completion: text,
             scene: submittedScene,
-            ...(structured != null ? { structuredJson: structured } : {}),
+            structuredJson: null
           }),
         });
         if (res.ok) {
@@ -266,7 +265,7 @@ export function useWorkHistory(
         modelId: submittedModelId,
         completion: text,
         scene: submittedScene,
-        ...(structured != null ? { structuredJson: structured } : {}),
+        structuredJson: null
       });
       setLocalHistory(getHistory());
     },

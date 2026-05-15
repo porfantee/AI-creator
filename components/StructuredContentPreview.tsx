@@ -1,5 +1,11 @@
+"use client";
+
 import type { StructuredContent } from "@/lib/types";
-import { formatStructuredAsPlain } from "@/lib/structured/format";
+import {
+  formatStructuredAsPlain,
+  structuredContentAsPlainBody,
+} from "@/lib/structured/format";
+import { Button } from "@/components/ui/button";
 
 export type StructuredPreviewActions = "overlay" | "inline";
 
@@ -21,27 +27,37 @@ export default function StructuredContentPreview({
 }: Props) {
   const buttons = (
     <div className="flex flex-wrap gap-1">
-      <button
+      <Button
         type="button"
-        className="bg-white text-xs px-2 py-1 rounded shadow-sm border border-gray-200 hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors"
+        size="xs"
+        variant="secondary"
+        className="shadow-sm"
         onClick={() => void navigator.clipboard.writeText(structured.title)}
       >
         复制标题
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
-        className="bg-white text-xs px-2 py-1 rounded shadow-sm border border-gray-200 hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors"
-        onClick={() => void navigator.clipboard.writeText(structured.body)}
+        size="xs"
+        variant="secondary"
+        className="shadow-sm"
+        onClick={() =>
+          void navigator.clipboard.writeText(structuredContentAsPlainBody(structured))
+        }
       >
         复制正文
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
-        className="bg-white text-xs px-2 py-1 rounded shadow-sm border border-gray-200 hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors"
-        onClick={() => void navigator.clipboard.writeText(formatStructuredAsPlain(structured))}
+        size="xs"
+        variant="secondary"
+        className="shadow-sm"
+        onClick={() =>
+          void navigator.clipboard.writeText(formatStructuredAsPlain(structured))
+        }
       >
         复制全部
-      </button>
+      </Button>
     </div>
   );
 
@@ -52,19 +68,21 @@ export default function StructuredContentPreview({
           {buttons}
         </div>
       ) : (
-        <div className="flex flex-wrap justify-end gap-1 border-b border-gray-200 pb-2">{buttons}</div>
+        <div className="flex flex-wrap justify-end gap-1 border-b border-border pb-2">{buttons}</div>
       )}
 
-      <h3 className={`font-bold text-lg text-gray-900 ${actions === "overlay" ? "pr-36" : ""} ${titleClassName}`}>
+      <h3 className={`font-bold text-lg text-foreground ${actions === "overlay" ? "pr-36" : ""} ${titleClassName}`}>
         {structured.title}
       </h3>
-      <div className="text-gray-800 whitespace-pre-wrap">{structured.body}</div>
+      <div className="text-foreground whitespace-pre-wrap">
+        {structuredContentAsPlainBody(structured)}
+      </div>
       {structured.tags.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {structured.tags.map((t, i) => (
             <span
               key={`${i}-${t}`}
-              className="text-xs px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600"
+              className="text-xs px-2 py-0.5 rounded-full bg-card border border-border text-muted-foreground"
             >
               #{t.replace(/^#/, "")}
             </span>
